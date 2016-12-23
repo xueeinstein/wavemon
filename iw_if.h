@@ -28,6 +28,9 @@
 #include <net/if_arp.h>
 #include <net/ethernet.h>
 #include <sys/socket.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
 #include <linux/if.h>
 #include <linux/wireless.h>
 
@@ -52,6 +55,9 @@
 #define WLAN_CAPABILITY_DSSS_OFDM       (1<<13)
 #define WLAN_CAPABILITY_DEL_BACK        (1<<14)
 #define WLAN_CAPABILITY_IMM_BACK        (1<<15)
+
+/* socket server */
+#define SERVER_PORT 8888
 
 
 /**
@@ -278,9 +284,15 @@ struct scan_result {
 	pthread_mutex_t   mutex;
 };
 
+struct server_thread_args {
+    struct scan_result *sr_ptr;
+    int client_sock;
+};
+
 extern void scan_result_init(struct scan_result *sr);
 extern void scan_result_fini(struct scan_result *sr);
 extern void *do_scan(void *sr_ptr);
+extern void *scan_service(void *sr_ptr);
 
 /*
  * utils.c

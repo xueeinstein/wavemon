@@ -13,6 +13,7 @@
 
 /* GLOBAL VARIABLES */
 static struct nl_sock *scan_wait_sk;
+static char res_msg[2000];
 
 
 /*
@@ -389,11 +390,20 @@ void scan_result_fini(struct scan_result *sr)
 }
 
 /** The actual scan thread. */
-void *do_scan(void *sr_ptr)
+void *do_scan(void *ptr)
 {
-	struct scan_result *sr = sr_ptr;
+        struct server_thread_args *s_args = ptr;
+	struct scan_result *sr = s_args->sr_ptr;
+        struct scan_entry *cur;
+        int client_sock = s_args->client_sock;
+        int read_size;
+        char client_msg[200];
+	/* struct scan_result *sr = sr_ptr; */
 	sigset_t blockmask;
 	int ret = 0;
+        int working = 1;
+        clock_t t = 0;
+        float sleep_time;
 
 	/* SIGWINCH is supposed to be handled in the main thread. */
 	sigemptyset(&blockmask);
@@ -401,7 +411,10 @@ void *do_scan(void *sr_ptr)
 	pthread_sigmask(SIG_BLOCK, &blockmask, NULL);
 
 	pthread_detach(pthread_self());
-	do {
+        while (working) {
+            sleep_time = ((float)(clock() - t) / 1000000.0F) * 1000;
+            if (sleep_time > conf.stat_iv) {
+                /* trigger scanner */
 		clear_scan_list(sr);
 
 		ret = iw_nl80211_scan_trigger();
@@ -448,7 +461,24 @@ void *do_scan(void *sr_ptr)
 			snprintf(sr->msg, sizeof(sr->msg),
 				 "Scan trigger failed on %s: %s", conf_ifname(), strerror(-ret));
 		}
-	} while (usleep(conf.stat_iv * 1000) == 0);
+                t = clock();
+            }
+            read_size = recv(client_sock, client_msg, 200, MSG_DONTWAIT);
+            if (read_size > 0) {
+                if (pthread_mutex_trylock(&sr->mutex) == 0) {
+                    memset(res_msg, 0, sizeof(res_msg));
+                    sprintf(res_msg, "%f", sleep_time);
+                    for (cur = sr->head; cur; cur = cur->next) {
+                        sprintf(res_msg + strlen(res_msg), "%s,%d;",
+                                ether_addr(&cur->ap_addr), cur->bss_signal);
+                    }
+                    write(client_sock, res_msg, strlen(res_msg));
+                    pthread_mutex_unlock(&sr->mutex);
+                } else {
+                    write(client_sock, res_msg, strlen(res_msg));
+                }
+            }
+        }
 
 	return NULL;
 }

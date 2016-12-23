@@ -24,7 +24,10 @@
 /* GLOBALS */
 static struct scan_result sr;
 static pthread_t scan_thread;
+static pthread_t server_thread;
 static WINDOW *w_aplst;
+static int socket_desc;
+static int client_sock;
 
 /**
  * Sanitize and format single scan entry as a string.
@@ -197,14 +200,54 @@ done:
 
 void scr_aplst_init(void)
 {
+        struct sockaddr_in server, client;
+        int line = START_LINE;
+        int c;
 	w_aplst = newwin_title(0, WAV_HEIGHT, "Scan window", false);
 
+        /* Create server to paass the scan results */
+
+        // create socket
+	mvwaddstr(w_aplst, line++, 1, "Create server...");
+        socket_desc = socket(AF_INET, SOCK_STREAM , 0);
+        if (socket_desc == -1) {
+            mvwaddstr(w_aplst, line++, 1, "Could not create socket");
+        }
+	mvwaddstr(w_aplst, line++, 1, "Socket created");
+
+        // prepare the sockaddr_in structure
+        server.sin_family = AF_INET;
+        server.sin_addr.s_addr = INADDR_ANY;
+        server.sin_port = htons(SERVER_PORT);
+
+        // bind
+        if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0) {
+            mvwaddstr(w_aplst, line++, 1, "Bind failed. Error");
+        }
+	mvwaddstr(w_aplst, line++, 1, "Bind done");
+
+        // listen
+        listen(socket_desc, 3);
+
+        // accept connection
+	mvwaddstr(w_aplst, line++, 1, "Waiting for incoming connections...");
+	wrefresh(w_aplst);
+        c = sizeof(struct sockaddr_in);
+        client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c);
+        if (client_sock < 0) {
+            mvwaddstr(w_aplst, line++, 1, "Accept failed");
+        }
+	mvwaddstr(w_aplst, line++, 1, "Connection accepted");
+
 	/* Gathering scan data can take seconds. Inform user. */
-	mvwaddstr(w_aplst, START_LINE, 1, "Waiting for scan data ...");
+	mvwaddstr(w_aplst, line++, 1, "Waiting for scan data ...");
 	wrefresh(w_aplst);
 
 	scan_result_init(&sr);
-	pthread_create(&scan_thread, NULL, do_scan, &sr);
+        struct server_thread_args *s_args = malloc(sizeof *s_args);
+        s_args->sr_ptr = &sr;
+        s_args->client_sock = client_sock;
+	pthread_create(&scan_thread, NULL, do_scan, (void *)s_args);
 }
 
 int scr_aplst_loop(WINDOW *w_menu)
@@ -250,7 +293,11 @@ int scr_aplst_loop(WINDOW *w_menu)
 
 void scr_aplst_fini(void)
 {
+        pthread_join(scan_thread, NULL);
+        pthread_join(server_thread, NULL);
 	pthread_cancel(scan_thread);
+	pthread_cancel(server_thread);
+        close(client_sock);
 	scan_result_fini(&sr);
 	delwin(w_aplst);
 }
