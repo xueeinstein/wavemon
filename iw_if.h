@@ -292,7 +292,7 @@ struct server_thread_args {
 extern void scan_result_init(struct scan_result *sr);
 extern void scan_result_fini(struct scan_result *sr);
 extern void *do_scan(void *sr_ptr);
-extern void *scan_service(void *sr_ptr);
+extern void *scan_server(void *sr_ptr);
 
 /*
  * utils.c

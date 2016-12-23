@@ -248,6 +248,7 @@ void scr_aplst_init(void)
         s_args->sr_ptr = &sr;
         s_args->client_sock = client_sock;
 	pthread_create(&scan_thread, NULL, do_scan, (void *)s_args);
+        pthread_create(&server_thread, NULL, scan_server, (void *)s_args);
 }
 
 int scr_aplst_loop(WINDOW *w_menu)

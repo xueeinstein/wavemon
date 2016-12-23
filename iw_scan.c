@@ -13,6 +13,7 @@
 
 /* GLOBAL VARIABLES */
 static struct nl_sock *scan_wait_sk;
+static pthread_mutex_t res_msg_mutex;
 static char res_msg[2000];
 
 
@@ -395,15 +396,8 @@ void *do_scan(void *ptr)
         struct server_thread_args *s_args = ptr;
 	struct scan_result *sr = s_args->sr_ptr;
         struct scan_entry *cur;
-        int client_sock = s_args->client_sock;
-        int read_size;
-        char client_msg[200];
-	/* struct scan_result *sr = sr_ptr; */
 	sigset_t blockmask;
 	int ret = 0;
-        int working = 1;
-        clock_t t = 0;
-        float sleep_time;
 
 	/* SIGWINCH is supposed to be handled in the main thread. */
 	sigemptyset(&blockmask);
@@ -411,74 +405,81 @@ void *do_scan(void *ptr)
 	pthread_sigmask(SIG_BLOCK, &blockmask, NULL);
 
 	pthread_detach(pthread_self());
-        while (working) {
-            sleep_time = ((float)(clock() - t) / 1000000.0F) * 1000;
-            if (sleep_time > conf.stat_iv) {
-                /* trigger scanner */
-		clear_scan_list(sr);
+        do {
+            clear_scan_list(sr);
 
-		ret = iw_nl80211_scan_trigger();
-		switch(-ret) {
-		case 0:
-		case EBUSY:
-			/* Trigger returns -EBUSY if a scan request is pending or ready. */
-			if (!wait_for_scan_events(sr)) {
-				snprintf(sr->msg, sizeof(sr->msg), "Waiting for scan data...");
-			} else {
-				pthread_mutex_lock(&sr->mutex);
-				ret = iw_nl80211_get_scan_data(sr);
-				if (ret < 0) {
-					snprintf(sr->msg, sizeof(sr->msg),
-						 "Scan failed on %s: %s", conf_ifname(), strerror(-ret));
-				} else if (!sr->head) {
-					snprintf(sr->msg, sizeof(sr->msg), "Empty scan results on %s", conf_ifname());
-				}
-				compute_channel_stats(sr);
-				pthread_mutex_unlock(&sr->mutex);
-			}
-			break;
-		case EPERM:
-			if (!has_net_admin_capability())
-				snprintf(sr->msg, sizeof(sr->msg),
-					 "This screen requires CAP_NET_ADMIN permissions");
-			return NULL;
-		case EFAULT:
-			/* EFAULT can occur after a window resizing event: temporary, fall through. */
-		case EINTR:
-		case EAGAIN:
-			/* Temporary errors. */
-			snprintf(sr->msg, sizeof(sr->msg), "Waiting for device to become ready ...");
-			break;
-		case ENETDOWN:
-			if (!if_is_up(conf_ifname())) {
-				snprintf(sr->msg, sizeof(sr->msg), "Interface %s is down - setting it up ...", conf_ifname());
-				if (if_set_up(conf_ifname()) < 0)
-					err_sys("Can not bring up interface '%s'", conf_ifname());
-				break;
-			}
-			/* fall through */
-		default:
-			snprintf(sr->msg, sizeof(sr->msg),
-				 "Scan trigger failed on %s: %s", conf_ifname(), strerror(-ret));
-		}
-                t = clock();
-            }
-            read_size = recv(client_sock, client_msg, 200, MSG_DONTWAIT);
-            if (read_size > 0) {
-                if (pthread_mutex_trylock(&sr->mutex) == 0) {
-                    memset(res_msg, 0, sizeof(res_msg));
-                    sprintf(res_msg, "%f", sleep_time);
-                    for (cur = sr->head; cur; cur = cur->next) {
-                        sprintf(res_msg + strlen(res_msg), "%s,%d;",
-                                ether_addr(&cur->ap_addr), cur->bss_signal);
+            ret = iw_nl80211_scan_trigger();
+            switch(-ret) {
+            case 0:
+            case EBUSY:
+                    /* Trigger returns -EBUSY if a scan request is pending or ready. */
+                    if (!wait_for_scan_events(sr)) {
+                            snprintf(sr->msg, sizeof(sr->msg), "Waiting for scan data...");
+                    } else {
+                            pthread_mutex_lock(&sr->mutex);
+                            ret = iw_nl80211_get_scan_data(sr);
+                            if (ret < 0) {
+                                    snprintf(sr->msg, sizeof(sr->msg),
+                                                "Scan failed on %s: %s", conf_ifname(), strerror(-ret));
+                            } else if (!sr->head) {
+                                    snprintf(sr->msg, sizeof(sr->msg), "Empty scan results on %s", conf_ifname());
+                            }
+                            compute_channel_stats(sr);
+                            pthread_mutex_unlock(&sr->mutex);
                     }
-                    write(client_sock, res_msg, strlen(res_msg));
-                    pthread_mutex_unlock(&sr->mutex);
-                } else {
-                    write(client_sock, res_msg, strlen(res_msg));
-                }
+                    break;
+            case EPERM:
+                    if (!has_net_admin_capability())
+                            snprintf(sr->msg, sizeof(sr->msg),
+                                        "This screen requires CAP_NET_ADMIN permissions");
+                    return NULL;
+            case EFAULT:
+                    /* EFAULT can occur after a window resizing event: temporary, fall through. */
+            case EINTR:
+            case EAGAIN:
+                    /* Temporary errors. */
+                    snprintf(sr->msg, sizeof(sr->msg), "Waiting for device to become ready ...");
+                    break;
+            case ENETDOWN:
+                    if (!if_is_up(conf_ifname())) {
+                            snprintf(sr->msg, sizeof(sr->msg), "Interface %s is down - setting it up ...", conf_ifname());
+                            if (if_set_up(conf_ifname()) < 0)
+                                    err_sys("Can not bring up interface '%s'", conf_ifname());
+                            break;
+                    }
+                    /* fall through */
+            default:
+                    snprintf(sr->msg, sizeof(sr->msg),
+                                "Scan trigger failed on %s: %s", conf_ifname(), strerror(-ret));
             }
-        }
+
+            pthread_mutex_lock(&res_msg_mutex);
+            memset(res_msg, 0, sizeof(res_msg));
+            for (cur = sr->head; cur; cur = cur->next) {
+                sprintf(res_msg + strlen(res_msg), "%s,%d;",
+                        ether_addr(&cur->ap_addr), cur->bss_signal);
+            }
+            pthread_mutex_unlock(&res_msg_mutex);
+        } while (usleep(conf.stat_iv * 1000) == 0);
 
 	return NULL;
+}
+
+void *scan_server(void *ptr)
+{
+    struct server_thread_args *s_args = ptr;
+    int client_sock = s_args->client_sock;
+    char client_msg[200];
+    int read_size;
+    while ((read_size = recv(client_sock, client_msg, 200, 0)) > 0) {
+        pthread_mutex_lock(&res_msg_mutex);
+        if (strlen(res_msg) > 0) {
+            write(client_sock, res_msg, strlen(res_msg));
+        } else {
+            sprintf(res_msg, "No data");
+            write(client_sock, res_msg, strlen(res_msg));
+        }
+        pthread_mutex_unlock(&res_msg_mutex);
+    }
+    return NULL;
 }
