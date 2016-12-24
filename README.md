@@ -9,14 +9,8 @@ varying features) with all devices supported by the Linux kernel.
 
 See the man page for an in-depth description of operation and configuration.
 
+This version is forked and developed by Bill Xue ([shadowthink.com](https://shadowthink.com)). Main update is that it starts a TCP server (binding to 0.0.0.0:8888) to provide scan data for other applications to access real time APs information.
 
-### Where to obtain
-
-Apart from debian/ubuntu packages (`apt-cache search wavemon`) and [slackbuild  scripts for wavemon](https://slackbuilds.org/result/?search=wavemon&sv=), this repository contains the full source code.
-
-Please check [this page](#) for updates and for further information.
-
-wavemon is distributed under the [GPLv3](http://www.gnu.org/licenses/gpl-3.0.en.html), refer to the file `COPYING`.
 
 ### Dependencies
 
@@ -56,4 +50,4 @@ If you have changed some of the autoconf files or use a git version, run
 
 ## Bugs?
 
-Send bug reports, comments, and suggestions by opening an issue on [github](https://github.com/uoaerg/wavemon/issues).
+Send bug reports, comments, and suggestions by opening an issue on [github](https://github.com/xueeinstein/wavemon/issues).
