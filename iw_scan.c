@@ -456,8 +456,13 @@ void *do_scan(void *ptr)
             pthread_mutex_lock(&res_msg_mutex);
             memset(res_msg, 0, sizeof(res_msg));
             for (cur = sr->head; cur; cur = cur->next) {
-                sprintf(res_msg + strlen(res_msg), "%s,%d;",
-                        ether_addr(&cur->ap_addr), cur->bss_signal);
+                if (!cur->next) {
+                    sprintf(res_msg + strlen(res_msg), "%s,%d",
+                            ether_addr(&cur->ap_addr), cur->bss_signal);
+                } else {
+                    sprintf(res_msg + strlen(res_msg), "%s,%d;",
+                            ether_addr(&cur->ap_addr), cur->bss_signal);
+                }
             }
             pthread_mutex_unlock(&res_msg_mutex);
         } while (usleep(conf.stat_iv * 1000) == 0);
